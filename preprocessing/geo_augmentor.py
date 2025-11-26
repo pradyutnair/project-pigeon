@@ -105,7 +105,7 @@ class GeoAugmentor:
         """
         logger.warning('Augmenting dataset with GADM country names.')
         if self.country_df is None:
-            self.country_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=COUNTRY_LAYER)
+            self.country_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=COUNTRY_LAYER, engine='fiona')
 
         # Compute country
         geo_data = gpd.GeoDataFrame(data, crs=CRS, geometry=gpd.points_from_xy(data.lng, data.lat))
@@ -132,7 +132,7 @@ class GeoAugmentor:
             List: all countries.
         """
         if self.country_df is None:
-            self.country_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=COUNTRY_LAYER)
+            self.country_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=COUNTRY_LAYER, engine='fiona')
         
         return self.country_df.sort_values(by='COUNTRY')['COUNTRY'].unique().tolist()
 
@@ -147,7 +147,7 @@ class GeoAugmentor:
         """
         logger.warning('Augmenting dataset with GADM Level 1 area names.')
         if self.area_df is None:
-            self.area_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=AREA_LAYER)
+            self.area_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=AREA_LAYER, engine='fiona')
 
         geo_data = gpd.GeoDataFrame(data, crs=CRS, geometry=gpd.points_from_xy(data.lng, data.lat))
 
@@ -178,7 +178,7 @@ class GeoAugmentor:
             List: all geo areas in country.
         """
         if self.area_df is None:
-            self.area_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=AREA_LAYER)
+            self.area_df = gpd.read_file(f'{self.path_prefix}{GADM_PATH}', layer=AREA_LAYER, engine='fiona')
 
         df_slice = self.area_df[self.area_df['COUNTRY'] == country]
         if len(df_slice) == 0:

@@ -13,11 +13,27 @@ CRS = 'EPSG:4326'
 # Logger
 logger = logging.getLogger('evaluation')
 
-# Load country geojson
-geo_df = gpd.read_file(COUNTRY_PATH)
-geo_df = geo_df.set_crs(crs=CRS)
-geo_df['geometry'] = geo_df['geometry'].apply(lambda x: x.buffer(0))
-country_shapes = geo_df['geometry'].values
+# Lazy load country geojson (only when needed)
+_geo_df = None
+_country_shapes = None
+
+def _load_country_data():
+    """Lazy load country geojson data."""
+    global _geo_df, _country_shapes
+    if _geo_df is None:
+        try:
+            # Use fiona engine to avoid pyogrio PROJ database issues
+            _geo_df = gpd.read_file(COUNTRY_PATH, engine='fiona')
+            _geo_df = _geo_df.set_crs(crs=CRS)
+            _geo_df['geometry'] = _geo_df['geometry'].apply(lambda x: x.buffer(0))
+            _country_shapes = _geo_df['geometry'].values
+        except Exception as e:
+            logger.warning(f"Could not load country data from {COUNTRY_PATH}: {e}")
+            _geo_df = gpd.GeoDataFrame()
+            _country_shapes = []
+    return _geo_df, _country_shapes
+
+# Don't initialize at module level - load lazily when needed
 
 def mae(labels: np.ndarray, preds: np.ndarray) -> float:
     error = np.mean(np.abs(labels - preds))
@@ -53,7 +69,7 @@ def recover_regression_values(values: np.ndarray, yfcc: bool=False) -> np.ndarra
     vals = vals - np.array([offset_val, 1, 0, 1, 1, 1]).transpose()
     return vals
 
-def find_country(point: Point, countries: List[MultiPolygon]=country_shapes) -> MultiPolygon:
+def find_country(point: Point, countries: List[MultiPolygon]=None) -> MultiPolygon:
     """Finds the country a given point lies in.
 
     Args:
@@ -63,11 +79,18 @@ def find_country(point: Point, countries: List[MultiPolygon]=country_shapes) -> 
     Returns:
         MultiPolygon: country polygone, None if not found
     """
+    geo_df, country_shapes = _load_country_data()
+    if geo_df.empty:
+        return None
+    
+    if countries is None:
+        countries = country_shapes
+    
     country = geo_df['geometry'].sindex.query(point, predicate='covered_by')
-    if len(country > 0):
+    if len(country) > 0:
         return geo_df.iloc[country[0]]['geometry']
         
-    logger.warn(f'Point not part of any country polygon: {point}')
+    logger.warning(f'Point not part of any country polygon: {point}')
     country = geo_df['geometry'].sindex.nearest(point, return_all=False)[1]
     return geo_df.iloc[country[0]]['geometry']
 

@@ -156,7 +156,7 @@ class GeocellCreator:
         print('Loading geographic boundaries ...')
 
         # Load smaller administrative areas
-        admin_2 = gpd.read_file(ADMIN_2_PATH)
+        admin_2 = gpd.read_file(ADMIN_2_PATH, engine='fiona')
         admin_2 = admin_2.set_crs(crs=CRS)
         admin_2['geometry'] = admin_2['geometry'].apply(lambda x: x.buffer(0))
         print(' ... loaded admin 2 boundaries.')
@@ -165,13 +165,13 @@ class GeocellCreator:
             return None, None, admin_2
 
          # Load Geo areas
-        admin_1 = gpd.read_file(ADMIN_1_PATH)
+        admin_1 = gpd.read_file(ADMIN_1_PATH, engine='fiona')
         admin_1 = admin_1.set_crs(crs=CRS)
         admin_1['geometry'] = admin_1['geometry'].apply(lambda x: x.buffer(0))
         print(' ... loaded admin 1 boundaries.')
 
         # Load countries
-        countries = gpd.read_file(COUNTRY_PATH)
+        countries = gpd.read_file(COUNTRY_PATH, engine='fiona')
         countries = countries.set_crs(crs=CRS)
         countries['geometry'] = countries['geometry'].apply(lambda x: x.buffer(0))
         print(' ... loaded countries.')

@@ -1,0 +1,611 @@
+﻿Towards Interpretable Geo-localization: a Concept-Aware Global Image-GPS
+Alignment Framework
+
+Furong Jia*1, Lanxin Liu*2, Ce Hou 3, Fan Zhang1†, Xinyan Liu 4, Yu Liu 1
+1Peking University
+
+2Harbin Institute of Technology
+3The Hong Kong University of Science and Technology
+
+4Harbin Institute of Technology (Weihai)
+
+Abstract
+Worldwide geo-localization involves determining the ex-
+act geographic location of images captured globally, typ-
+ically guided by geographic cues such as climate, land-
+marks, and architectural styles. Despite advancements in geo-
+localization models like GeoCLIP, which leverages images
+and location alignment via contrastive learning for accurate
+predictions, the interpretability of these models remains in-
+sufficiently explored. Current concept-based interpretability
+methods fail to align effectively with Geo-alignment image-
+location embedding objectives, resulting in suboptimal inter-
+pretability and performance. To address this gap, we pro-
+pose a novel framework integrating global geo-localization
+with concept bottlenecks. Our method inserts a Concept-
+Aware Alignment Module that jointly projects image and lo-
+cation embeddings onto a shared bank of geographic con-
+cepts (e.g., tropical climate, mountain, cathedral) and mini-
+mizes a concept-level loss, enhancing alignment in a concept-
+specific subspace and enabling robust interpretability. To our
+knowledge, this is the first work to introduce interpretability
+into geo-localization. Extensive experiments demonstrate that
+our approach surpasses GeoCLIP in geo-localization accu-
+racy and boosts performance across diverse geospatial predic-
+tion tasks, revealing richer semantic insights into geographic Figure 1: Concept-aware geo-localization overview. (A)
+decision-making processes. CLIP-based geo-localization model predicts GPS coordi-
+
+nates by directly mapping visual embeddings to a location
+embedding gallery, following the image-location alignment.
+
+Introduction (B) Our approach inserts a concept bottleneck between im-
+Image geo-localization refers to the task that determine ge- age and GPS, grounding GPS prediction in semantically
+ographic coordinates from visual content alone. With ap- meaningful cues.
+plications ranging from ecological monitoring (Beery et al.
+2022; Rußwurm et al. 2020) to disaster response (Sathia-
+narayanan, Hsu, and Chang 2024), it has attracted increas- retrieval, it still faces the challenge of distinguishing visu-
+ing attention. However, achieving accurate worldwide im- ally similar scenes from geographically distinct areas. This
+age geo-localization remains technically challenging since is because successful geo-localization requires more than
+the enormous variability in Earth’s geographical landscapes. just learning spatial distributions of visual landscapes, it de-
+
+Recent CLIP-based geo-localization models (Fig. 1A) mands an understanding of broader geographic knowledge
+(Vivanco Cepeda, Nayak, and Shah 2023; Klemmer et al. and fine-grained concepts (Fig. 1B) to distinguish between
+2025; Zhong et al. 2022) have shown promising perfor- locations across the globe. Relying solely on raw geograph-
+mance in zero-shot geo-localization by aligning image and ical coordinates to learn location embeddings is insufficient
+geographical location (latitude, longitude) embeddings in a for encoding such world knowledge.
+shared space. While this approach enables global location
+
+Beyond performance, interpretability of image geo-
+*These authors contributed equally. localization is also important not only for reliable geo-
+†Corresponding author: fanzhanggis@pku.edu.cn graphic decision-making but also for understanding the spa-
+
+arXiv:2509.01910v1  [cs.CV]  2 Sep 2025
+
+
+
+tial cognitive abilities of AI (Roberts et al. 2023). The rea- Müller-Budack, and Ewerth 2022) introduce a semantic par-
+soning behind geo-localization is inherently complex, in- titioning strategy that replaces fixed or arbitrarily defined
+volving diverse cues like landmarks, architectural style, and spatial partitions with more coherent region definitions.
+environmental features. While prior work either overlooks Another widely adopted paradigm is retrieval-based geo-
+interpretability or focuses solely on pixel-level attribution localization, where the goal is to match a query image
+methods (Theiner, Müller-Budack, and Ewerth 2022) that against a gallery—either of reference images or location
+quantify region importance through low-level visual fea- embeddings—based on similarity (Workman, Souvenir, and
+tures, it lacks the conceptual understanding required for Jacobs 2015; Tian, Chen, and Shah 2017; Liu and Li
+high-level tasks. This underscores the need for concept- 2019; Shi et al. 2020; Yang, Lu, and Zhu 2021; Zhu et al.
+based interpretability that grounds predictions in human- 2023). Among retrieval-based methods, GeoCLIP was the
+understandable semantic concepts. first work employing geographical location encoding and
+
+To achieve more precise and interpretable geo- retrieve location through geo-alignment (Vivanco Cepeda,
+localization, we introduce a framework that integrates Nayak, and Shah 2023), leveraging contrastive paradigm
+precise location recognition with concept-driven alignment. and CLIP’s pretrained image encoder (Radford et al. 2021).
+Specifically, we introduce a Geography-Driven Concept Building on this, we propose enhancing image–location re-
+Set, comprising regionally significant attributes carefully trieval with interpretable geographic concepts as intermedi-
+selected for their clear geospatial meaning, allowing the ate anchors for alignment.
+model to ground its predictions in recognizable geographic
+features. This enhances the model’s interpretability by Concept-based Model Interpretation
+linking its outputs to well-defined concepts that are easily
+understood. Additionally, we propose a Concept-Aware The concept-based interpretation has received consider-
+Alignment Module that aligns image and location embed- able attention for its ability to ground model decisions in
+dings within a geography-driven concept subspace defined high-level, human-interpretable concepts (Yeh et al. 2020).
+by CLIP-based embeddings. The concept-aware alignment This approach is particularly important in image classifica-
+encourages image and location embeddings to converge tion (Ghorbani et al. 2019) and multimodal learning (Parekh
+toward similar distributions within an interpretable semantic et al. 2024), where providing transparent rationales for pre-
+space, enhancing interpretability, while preserving accuracy. dictions is essential for building user trust.
+
+Our contributions can be summarized as follows: The Concept Bottleneck Model (CBM) (Koh et al. 2020)
+• We develop a systematic approach to construct exemplifies this paradigm. CBMs decompose prediction into
+
+Geography-Driven Concept Sets from regionally two sequential stages: first, inferring intermediate concepts
+salient attributes for interpretable geographic grounding. from inputs, and then using these inferred concepts to pro-
+
+duce the final classification. By employing unsupervised
+• We propose a Concept-Aware Alignment Module that techniques to discover and utilize latent concepts, label-free
+
+aligns image and location embeddings within an inter- CBMs (Oikarinen et al. 2023) expand the concept-based
+pretable, geography-driven concept subspace. paradigm to settings where labeled concept annotations are
+
+• Extensive experiments demonstrate that our framework unavailable. Post-hoc CBMs (Yuksekgonul, Wang, and Zou
+not only provides intuitive explanations but also im- 2022) enable interpretability in pre-trained models without
+proves GeoCLIP’s performance on geo-localization tasks changing their original parameters. Recently, language mod-
+as well as downstream tasks. els have demonstrated the ability to define and organize con-
+
+cepts in a way that aligns with human cognition, enhanc-
+Related Work ing the usability of concept-based interpretability frame-
+
+Image Geo-localization works (Yang et al. 2023). This line of work is further ad-
+While recent studies have explored the potential of large vanced by models that eliminate the need for predefined
+language models (LLMs) for geo-localization via natural- concept sets, instead generating fluent and accurate natural
+language reasoning and direct coordinate prediction (Xu language explanations directly from inputs using pretrained
+et al. 2024; Jia et al. 2024; Zhou et al. 2024; Jia et al. 2025; vision–language models (Yamaguchi and Nishida 2025).
+Ye et al. 2024; Wang et al. 2025), the majority of existing
+methods still fall into two primary paradigms: classification- Method
+based and retrieval-based approaches (Vivanco Cepeda,
+Nayak, and Shah 2023). Definition of Interpretability for Geo-localization
+
+Classification-based approaches discretize the earth’s sur- We regard image-based geo-localization as a concept-guided
+face into predefined cells and train models to assign each im- retrieval problem, where the predicted location corresponds
+age to one of these regions (Weyand, Kostrikov, and Philbin to the geographical coordinate whose embedding is closest
+2016; Seo et al. 2018; Vo, Jacobs, and Hays 2017; Pra- to that of the input image. Given an image I ∈ I, our aim is
+manick et al. 2022; Clark et al. 2023). While conceptu- to learn a mapping F : I −→ L × P(C), where L denotes
+ally straightforward, this formulation enforces a fixed spatial the continuous space of geographical coordinates (latitude–
+granularity that often causes large localization errors near longitude pairs) and P(C) the set of a predefined concept
+cell boundaries or in underrepresented areas. To improve in- library C = {c1, . . . , cn}. For each input, F produces a pre-
+terpretability under this paradigm, Theiner et al. (Theiner, dicted location L ∈ L.
+
+
+
+Figure 2: The pretraining and inference pipeline. Left: The pretraining framework with a Concept-Aware Alignment Module
+integrated into the image–GPS contrastive learning process. Right: The inference process of image geo-localization.
+
+The overall architecture is illustrated in Figure 2. To en- (3) Manual refinement: Finally, we manually review and
+able concept-guided geolocation, our framework extracts filter the generated concepts to achieve conciseness and ef-
+and aligns features from images, GPS locations, and geo- fectiveness.
+graphic concepts. We integrates a Geography-Driven Con-
+cept Set C = {c1, . . . , cn}, where each ci represents a re- Concept-Aware Alignment Module
+gionally salient attribute (e.g., landform, architectural style) We first construct a concept basis from the concept set C,
+with explicit geospatial semantics, alongside a Concept- where concepts are encoded using a frozen CLIP text en-
+Aware Alignment Module M(·). We employ CLIP-based coder to obtain a matrix of semantic directions. A learnable
+encoders for all three modalities: an image encoder Eimg offset is added to tailor the concept basis to the image ge-
+that maps an image I to features ximg = Eimg(I) ∈ Rd, olocalization task, yielding a tunable set of concept vectors
+a location encoder Eloc that transforms GPS coordinates B ∈ Rd×k, where k is the number of selected concepts in the
+L ∈ L into xloc = Eloc(L) ∈ Rd (cf. GeoCLIP (Vi- subset Ck ⊆ C. Formally, the concept basis is constructed
+vanco Cepeda, Nayak, and Shah 2023)) and a text encoder as:
+Etext that maps concept text into concept text embeddings. B = Econcept +∆, (1)
+Within M(·), we align ximg and xloc using contrastive learn-
+
+where Econcept ∈ Rd×k
+ing in the original feature space, then project both into a denotes the fixed textual embeddings
+concept subspace via a learnable basis matrix B ∈ Rd×k. of the k concepts in Ck obtained from a frozen CLIP text
+This dual-alignment approach enhances localization accu- encoder Etext, and ∆ ∈ Rd×k is a learnable offset matrix
+racy while grounding predictions in interpretable geographic optimized during training to adapt the concept directions to
+concepts. the downstream geolocalization task.
+
+During training, the image features ximg = EI(I) ∈ Rd
+
+are projected into the concept subspace via a lightweight
+Construction of Geography-Driven Concept Set MLP:
+
+zimg = fimg(ximg) ∈ Rk
+We construct a concept set C that captures geographically , (2)
+meaningful semantics, following a three-step procedure: where fimg(·) denotes the MLP, and k is the number of se-
+
+(1) Grounding in geographic knowledge: We first con- lected concepts in Ck.
+struct a comprehensive pool of geographically relevant con- In parallel, the location features xloc = EL(L) ∈ Rd are
+cepts by extracting domain-specific expert knowledge from directly projected using the concept basis matrix B ∈ Rd×k:
+extensive textual resources, such as Wikipedia and domain-
+
+zloc = x⊤
+locB ∈ Rk
+
+specific knowledge graphs (e.g., WorldKG (Dsouza et al. . (3)
+2021)). These sources encompass both natural geographic Both zimg and zloc lie in the interpretable concept sub-
+knowledge (e.g., climate types) and human geographic space and serve as semantic representations aligned across
+knowledge (e.g., transportation), ensuring that our initial modalities.
+concept set is extensive and geographically informed.
+
+(2) LLM-based enrichment: Recent research has validated Loss Function Our objective combines a cross-modal
+the effectiveness of LLMs in generating robust and contex- alignment loss and a distribution-level consistency loss in
+tually nuanced visual concepts (Ruiz Luyten and van der the concept space.
+Schaar 2024). To enrich the initial concept set and cap- First, we define the image-to-location contrastive loss as a
+ture finer-grained and culturally distinctive elements, we fur- standard cross entropy loss over the similarity logits. Given
+ther utilize LLMs such as GPT4 (Achiam et al. 2023). The a batch of N image-location pairs {(zimg
+
+i , zloc
+i )}Ni=1, the loss
+
+prompt we used is included in the supplementary material. is computed as:
+
+
+
+Datasets and Evaluation details
+
+∑ ( )
+N exp zimg
+
+i · zloc
+i /
+
+Limg-gps = − 1 ∑ ( τ
+log ) We train our model using the MediaEval Placing Task
+
+, (4) 2016 (MP-16) (Larson et al. 2017) dataset, a curated sub-
+N N img set of the Yahoo Flickr Creative Commons 100 Million
+
+i=1 j=1 exp zi · zloc
+j /τ
+
+(YFCC100M) (Thomee et al. 2016). For evaluation, we test
+where τ is a learnable temperature parameter that controls the trained model on the Im2GPS3k (Hays and Efros 2008)
+the scale of the similarity scores. This objective encour- benchmark, following GeoCLIP (Vivanco Cepeda, Nayak,
+ages each image representation to be most similar to its cor- and Shah 2023). Additional datasets used for downstream
+responding GPS embedding while pushing apart unrelated tasks, along with task definitions, are detailed in the follow-
+pairs. ing section. Performance is reported using a threshold-based
+
+To encourage modality-invariant concept representations, metric, where we compute the geodesic distance between
+we further introduce a Concept Space Divergence Loss, predicted and ground-truth locations and calculate the per-
+inspired by multi-modal distributional alignment tech- centage of predictions within predefined distance thresholds
+niques (Yin et al. 2025). Specifically, we use a Gaussian ker- (1 km, 25 km, 200 km, 750 km, and 2500 km). Other imple-
+nel function: ( ) mentation details are shared in supplementary.
+
+−∥x− y∥2 Downstream tasks
+K(x,y) = exp , (5)
+
+2σ2
+To investigate whether pretraining with a concept bottleneck
+
+and compute the divergence between the projected image enhances the expressiveness of location embeddings, we
+features zimg and projected location features zloc as: evaluate their performance on geospatial downstream tasks
+
+beyond image geo-localization. We use the pretrained loca-
+N tion embeddings to predict geographic attributes, including
+
+1 ∑[ ( )
+L socioeconomic characteristics and environmental factors,
+concept = logK zimg )
+
+N2 i , zimg (
+j + logK zloc] i , zlocj
+
+i,j=1 ( based on input geographical coordinates, using multi-layer
+perceptron (MLP) models. For socioeconomic attributes, we
+
+−2 logK zimg )
+i , zlocj . construct a nationwide dataset of median income and edu-
+
+(6) cational attainment at the census tract level using data from
+The total loss is given by: U.S. Census Bureau data. The educational attainment task
+
+involves predicting the proportion of the population with a
+L = Limg-gps + λ · Lconcept, (7) Bachelor’s degree and a Graduate degree. We addition-
+
+ally include a country classification task (Klemmer et al.
+where λ is a weighting coefficient. 2025) as part of the evaluation. For environmental factors,
+
+we perform an air temperature prediction task (Hooker,
+Experiments Duveiller, and Cescatti 2018) and a species classification
+
+task (Van Horn et al. 2018). In the species classification task,
+We structure our experiments around four research questions we extract image embeddings from our visual encoder and
+that investigate how to enhance the interpretability and per- concatenate them with the location embeddings.
+formance of multimodal contrastive learning approaches for All downstream tasks use MSE loss for regression and
+image geo-localization. First, we explore whether the intro- cross-entropy for classification. Hyperparameters such as
+duction of Concept-Aware Alignment Module contributes to learning rate, number of layers, and hidden dimensions are
+overall performance, both in terms of image geo-localization tuned via random search on a validation set, and results are
+task (RQ 1) and other downstream geospatial tasks (RQ 2). reported on a held-out test set.
+To this end, we evaluate the pretrained concept-aware em-
+beddings on a set of downstream geospatial tasks, compar-
+ing their effectiveness with baseline contrastive learning- Performance on Image Geo-localization (RQ 1)
+based models that do not leverage concept bottlenecks. We conduct a comparative evaluation of our model on
+
+To explore the interpretability of image geo-localization, global image geo-localization benchmarks. Specifically, we
+we further ask: to what extent can the interpretability re- compare against the following methods: kNN(Vo, Jacobs,
+sults reveal geographically meaningful patterns that align and Hays 2017), PlaNet(Weyand, Kostrikov, and Philbin
+with human understanding (RQ 3). We examine whether the 2016), CPlaNet(Seo et al. 2018), ISNs(Muller-Budack,
+explanations derived from our model, at both the individ- Pustu-Iren, and Ewerth 2018), Translocator(Pramanick et al.
+ual and global levels, reveal established geographic knowl- 2022), GeoDecoder(Clark et al. 2023), and GeoCLIP (Vi-
+edge, including both natural and cultural features. Finally, vanco Cepeda, Nayak, and Shah 2023).
+we explore whether concept-aware contrastive pretraining Table 1 presents the results on the Im2GPS3k dataset.
+facilitates the emergence of more geographically structured Across all distance thresholds, our model consistently out-
+embeddings for both images and locations (RQ 4). performs GeoCLIP and other baselines, with improvements
+
+In the remainder of this section, we describe our experi- of +2.4%, +2.9%, +1.1%, +0.6%, and +0.3% at the 1km,
+mental setup in detail, including datasets, downstream tasks. 25km, 200km, 750km, and 2500km levels, respectively.
+
+
+
+Table 1: Our method outperforms GeoCLIP and other geo-
+localization methods on Im2GPS3k, achieving consistent
+improvements across different distance thresholds.
+
+Method Street City Region Country Continent
+(1 km) (25 km) (200 km) (750 km) (2500 km)
+
+[L]kNN, σ = 4 7.2 19.4 26.9 38.9 55.9 Figure 3: Visualization of concept contributions in
+PlaNet 8.5 24.8 34.3 48.4 64.6 country-level geo-localization task with Label-free CBM.
+CPlaNet 10.2 26.5 34.6 48.6 64.6
+ISNs 3.2 9.6 14.3 25.1 43.9
+Translocator 7.6 20.3 27.1 40.7 63.3
+GeoDecoder 5.7 10.3 21.4 28.9 38.6
+GeoCLIP 10.8 31.1 48.7 67.6 83.2
+Ours 13.2 34.0 49.8 68.2 83.5
+
+Task ↓ Data → Spatial coverage Ours GeoCLIP
+Regression R2 ↑
+Air temperature Global 0.7538 0.7257
+Median income USA 0.5468 0.4983
+Bachelor’s degree USA 0.5386 0.4742
+Graduate degree USA 0.5524 0.5123 Figure 4: Global decision rules in image geo-localization.
+Classification Accuracy ↑ Diagram showing prominent visual concepts differentiat-
+Countries Global 91.12 90.72 ing image geo-localization predictions between China and
+iNaturalist Global 65.94 62.01 Japan. Examples highlight region-specific concepts illustrat-
+
+ing how the model’s learned concepts reflect meaningful ge-
+Table 2: Performance comparison between our model and ographic and cultural patterns. Zoom in for better view.
+GeoCLIP on downstream tasks.
+
+are interpretable at an aggregated level. In Figure 4, we
+Downstream Task Performance (RQ 2) show identified prominent concepts that distinguish China
+As shown in Table 2, our model consistently outperforms and Japan by measuring per-concept activation levels in
+GeoCLIP on both the socioeconomic attribute prediction the concept subspace of our Concept-Aware Image–GPS
+and environmental factor prediction tasks. These tasks span Contrastive Module. The Sankey diagram clearly reveals
+different spatial scales, ranging from nationwide to global concepts that align well with intuitive geographic and cul-
+coverage. The results demonstrate that concept-aware pre- tural understanding. For example, “Tuk-tuk” is distinctly
+training enhances the expressiveness and utility of location prevalent in China, reflecting its popularity due to versatil-
+embeddings across diverse geographic prediction tasks. ity and widespread usage. “Incense,” notably connects with
+
+the traditional Japanese tea ceremony (Chado), emphasiz-
+Interpretable Geo-localization (RQ 3) ing its cultural resonance across regions. Similarly, “Mono-
+Individual explainable cases To probe the interpretabil- rail,” while existing in both countries, is strongly associated
+ity of the representations learned with our Concept-Aware with Japan due to landmarks like the historically signifi-
+Image–GPS Contrastive Module, we cast a country-level cant Shonan Monorail. The results suggest that the learned
+classification task that takes the image features produced by concepts effectively capture geographically distinctive fea-
+our pretrained image encoder as input. A Label-Free CBM tures, shedding light on the global interpretability of geo-
+(Oikarinen et al. 2023) is trained on these features; its fi- localization model.
+nal normalized linear weights serve as concept-contribution
+scores. Figure 3 illustrates two correctly classified examples Concept-level activation To assess the relative activation
+(more visualizations are available in the supplementary ma- levels of individual concepts in our model’s representa-
+terial). The model assigns the highest positive weights to the tions and predictions, we analyze concept-wise scores on the
+concepts “skyscraper” and “esplanade,” both salient visual Im2GPS3k dataset. Each concept score is derived from the
+cues of Hong Kong. It also highlights “advertisement” and image’s projection in the concept subspace, where the pro-
+the climate-related concept “typhoon,” consistent with the jected value represents the activation strength of that con-
+city’s dense commercial signage and subtropical weather. cept. We enforce sparsity by retaining only the top-20 scor-
+For the French scene, the concept “historical civilization”, ing concepts per image. Then, we compute the median score
+triggered by the prominent heritage architecture, dominates for each concept across all images and rank them within
+the decision, aligning well with human intuition. three geolocation error intervals. As shown in Table 3, we
+
+report the top-8 and bottom-8 concepts with the highest and
+Global decision rules We further examine whether our lowest median scores (ms), respectively, within each spatial
+concept-aware model captures global decision rules that bin. Although these activation values do not directly indi-
+
+
+
+Table 3: Top-8 and lowest-8 concepts by median score (ms) across distance error intervals.
+
+Top-8 Lowest-8
+[0–25) [25–200) [200–750) [0–25) [25–200) [200–750)
+
+concept ms concept ms concept ms concept ms concept ms concept ms
+Windmill 0.1117 Eucalyptus 0.1139 Eucalyptus 0.1188 Island 0.0561 Motorcycle 0.0685 Cobblestone 0.0673
+Theater 0.1085 Cairn 0.1073 PowerLine 0.1108 Uniform 0.0547 Fortress 0.0678 Souk 0.0662
+Factory 0.1067 PrayerFlags 0.1067 Crater 0.1084 Tea 0.0533 Hedge 0.0660 Woodland 0.0636
+
+Scaffolding 0.1054 Grapevine 0.1060 Favela 0.1063 Brickwork 0.0527 Townhouse 0.0640 Oak Tree 0.0630
+Promenade 0.1052 Favela 0.1060 Vending 0.1024 Reflection 0.0489 Hairstyle 0.0627 Shanty town 0.0602
+
+Drizzle 0.1041 Temperate 0.1059 Chimney 0.1016 Gate 0.0454 Succulent 0.0627 Summit 0.0592
+Mangrove 0.1041 Sari 0.1052 Dune 0.1011 Lorry 0.0449 SandDune 0.0623 Pennant 0.0519
+Sombrero 0.1037 Underpass 0.1045 Gondola 0.1009 Bus 0.0448 Plantation 0.0621 Demonstration 0.0472
+
+cate causal influence, higher concept activation may suggest
+a stronger presence or reliance of that concept in the predic-
+tion process.
+
+Concept-Aware Embedding Analysis (RQ 4)
+We demonstrate the concept bottleneck enhances geo-
+graphic semantics in location embeddings. Since the loca-
+tion encoder has been trained to align with the pre-trained
+CLIP text embedding space, we can create concept simi-
+larity maps by measuring the similarity between each loca-
+tion embedding and a given concept’s text embedding (Vi-
+vanco Cepeda, Nayak, and Shah 2023). For example, by
+querying the concept “forest”, we generate a state-level sim-
+ilarity map across the U.S. (Figure 5A), where the value for
+each state is obtained by averaging the similarity across sam-
+ple points within the state. As shown in Figure 5B, which
+presents a reference map of forests in the U.S., the high- Figure 5: Visualization of how location embeddings cap-
+lighted regions in the similarity map corresponds to known ture interpretable geographic concepts aligned with real-
+forest-dense regions. world distributions. (A) State-level similarity map for the
+
+concept “forest” derived from our model’s location embed-
+Quantitatively, we assess the alignment between the con- dings. (B) Reference map of forests across the U.S. (C) Cor-
+
+cept similarity and the ground truth geospatial distribution relation between actual forest coverage and concept similar-
+by computing the Pearson correlation coefficient (ρ) at the ity from our model. (D) Correlation using concept similarity
+U.S. state level. We use 2016 forest coverage data obtained from GeoCLIP.
+from Wikipedia as the reference. As shown in Figure 5C and
+Figure 5D, our model’s similarity map achieves a higher cor-
+relation (ρ = 0.6525, p < 0.001) compared to GeoCLIP
+(ρ = 0.3536, p = 0.013), indicating enhanced representa- beddings toward capturing both spatial contiguity and geo-
+tion of geographic concepts in our location embeddings. graphic similarity.
+
+To further answer RQ4 and explore whether concept-
+aware pretraining alters how image representations encode Ablation Studies
+geographic information, we apply dimensionality reduction Effectness of Concept Set To assess the effectiveness of
+(UMAP) to visualize image embeddings from Im2GPS3k. our proposed Geography-Driven Concept Set, we conduct
+We then utilized k-means clustering to identify underlying an ablation study comparing it against a general concept set
+patterns. As illustrated in Figure 6, the clusters can reflect constructed using the SpLiCE method (Bhalla et al. 2024) on
+geographic structures: some clusters correspond to spatial IM2GPS3k dataset. SpLiCE leverages the semantic struc-
+proximity and geographically adjacent regions, while oth- ture of CLIP’s latent space to decompose representations
+ers bring together locations that are spatially distant yet into sparse, human-interpretable concepts, offering a task-
+share similar attributes. For instance, Cluster 1 predomi- agnostic approach to enhance interpretability without requir-
+nantly contains images from China. Cluster 2 groups im- ing additional training.
+ages associated with coastal scenes and Cluster 6 is char- As presented in Table 4, the results demonstrate the su-
+acterized by mountainous terrain. Cluster 4 clusters images periority of the Geography-Driven Concept Set across all
+depicting culturally and historically significant architecture. spatial granularities. Specifically, our tailored concept set
+Incorporating concept-aware mechanism shapes image em- achieves accuracy improvements of 1.32% at 1km levels,
+
+
+
+Figure 7: UMAP visualization of embeddings from im-
+ages, locations, and concepts. We project image–location
+embedding pairs and concept text embeddings (from CLIP)
+into 2D using UMAP, with lines connecting each image to its
+corresponding location. Compared to GeoCLIP, our model
+
+Figure 6: UMAP visualization of image embeddings from exhibits a more structured and semantically coherent em-
+the Im2GPS3k dataset learned by the Concept-Aware Align- bedding space.
+ment Module. Each point represents an image colored by k-
+means cluster assignment. More visualizations are provided
+in the supplementary materials. graphic concepts, thereby improving both accuracy and in-
+
+terpretability. Notably, the significant performance boost at
+the 1km (22.22%) and 25km (9.32%) levels suggests that
+
+compared to the SpLiCE-generated general concept set. And the module excels in capturing fine-grained semantic cues
+our method achieve improvement in all level ranges, high- essential for precise localization.
+lighting the ability of our concept set to capture semanti-
+cally rich geographic knowledge critical for mid-scale local- Table 5: Geo-localization accuracy on IM2GPS3k with and
+ization tasks. The consistent performance improvements un- without the Concept-Aware Alignment Module across dif-
+derscore the importance of incorporating geography-specific ferent spatial granularities.
+concepts, which enhance the model’s understanding of
+world knowledge and its semantic interpretability. Method Street City Region Country Continent
+
+(1 km) (25 km) (200 km) (750 km) (2500 km)
+Table 4: Comparison of geo-localization accuracy on
+IM2GPS3k across spatial granularities for models using W/o Concept-Aware 10.8 31.1 48.7 67.6 83.2
+
+Alignment Module
+the Geography-Driven Concept Set versus the SpLiCE- W/ Concept-Aware 13.2 34.0 49.8 68.2 83.5
+Generated Concept Set. Alignment Module
+
+Concept Set Street City Region Country Continent
+(1 km) (25 km) (200 km) (750 km) (2500 km) Discussion
+
+SpLiCE- 11.88 32.92 33.16 66.73 80.41
+Generated To investigate the impact of incorporating concepts into the
+Geography- 13.2 34.0 49.8 68.2 83.5 image-GPS contrastive representation learning framework
+Driven from a multimodal perspective, we visualize UMAP pro-
+
+jections of embeddings from GeoCLIP and our model, de-
+rived from image, location, and text modalities. Text em-
+
+Effectness of Concept-Aware Alignment Module To beddings use CLIP-generated representations of geographic
+evaluate the effectiveness of our proposed Concept-Aware concepts employed in training. Figure 7 reveals a significant
+Alignment Module, we conducted an ablation study com- “modality gap” (Liang et al. 2022) in GeoCLIP, where image
+paring the geo-localization performance of our model with and location embeddings are distant from text embeddings,
+and without this module. The experiments were performed likely due to its image-GPS alignment suppressing seman-
+on IM2GPS3k dataset. tic alignment. Conversely, our model’s embeddings show
+
+As presented in Table 5, the results demonstrate the con- cohesive alignment across modalities, with geographic con-
+tribution of the Concept-Aware Alignment Module to geo- cepts centrally aligned, enhancing interpretability and geo-
+localization performance, which improves geo-localization localization performance.
+accuracy, achieving 13.2% and 83.5% at 1km and 2500km
+levels, respectively. This improvement aligns with our goal Conclusion
+of addressing the loss of world knowledge, as the module In this paper, we presents an interpretable geo-localization
+enables the model to leverage semantically grounded geo- framework that integrates geographic concepts into con-
+
+
+
+trastive learning for image-GPS alignment. We propose Jia, P.; Park, S.; Gao, S.; Zhao, X.; and Li, Y. 2025. Geo-
+a Geography-Driven Concept Set tailored for human- Ranker: Distance-Aware Ranking for Worldwide Image Ge-
+understandable semantic concepts, and a Concept-Aware olocalization. arXiv preprint arXiv:2505.13731.
+Alignment Module that enhances image and location em- Klemmer, K.; Rolf, E.; Robinson, C.; Mackey, L.; and
+beddings with a learnable concept subspace, achieving supe- Rußwurm, M. 2025. Satclip: Global, general-purpose lo-
+rior alignment and robust world knowledge integration. Ex- cation embeddings with satellite imagery. In Proceedings of
+periments on Im2GPS3k and downstream geospatial tasks the AAAI Conference on Artificial Intelligence, volume 39,
+show improved accuracy (e.g., +2.4% at 1 km over Geo- 4347–4355.
+CLIP) and interpretability, with learned explanations align- Koh, P. W.; Nguyen, T.; Tang, Y. S.; Mussmann, S.; Pier-
+ing closely with real-world geographic patterns and human son, E.; Kim, B.; and Liang, P. 2020. Concept bottleneck
+cognition. models. In International conference on machine learning,
+
+5338–5348. PMLR.
+Acknowledgments Larson, M.; Soleymani, M.; Gravier, G.; Ionescu, B.; and
+
+Furong Jia would like to thank Gezhi Xiu for his insightful Jones, G. J. 2017. The benchmarking initiative for multime-
+discussions and valuable guidance. dia evaluation: MediaEval 2016. IEEE MultiMedia, 24(1):
+
+93–96.
+References Liang, V. W.; Zhang, Y.; Kwon, Y.; Yeung, S.; and Zou,
+
+Achiam, J.; Adler, S.; Agarwal, S.; Ahmad, L.; Akkaya, I.; J. Y. 2022. Mind the gap: Understanding the modal-
+Aleman, F. L.; Almeida, D.; Altenschmidt, J.; Altman, S.; ity gap in multi-modal contrastive representation learning.
+Anadkat, S.; et al. 2023. Gpt-4 technical report. arXiv Advances in Neural Information Processing Systems, 35:
+preprint arXiv:2303.08774. 17612–17625.
+Beery, S.; Wu, G.; Edwards, T.; Pavetic, F.; Majewski, B.; Liu, L.; and Li, H. 2019. Lending orientation to neural net-
+Mukherjee, S.; Chan, S.; Morgan, J.; Rathod, V.; and Huang, works for cross-view geo-localization. In Proceedings of
+J. 2022. The auto arborist dataset: a large-scale benchmark the IEEE/CVF Conference on Computer Vision and Pattern
+for multiview urban forest monitoring under domain shift. Recognition, 5624–5633.
+In Proceedings of the IEEE/CVF Conference on Computer Muller-Budack, E.; Pustu-Iren, K.; and Ewerth, R. 2018.
+Vision and Pattern Recognition, 21294–21307. Geolocation estimation of photos using a hierarchical model
+Bhalla, U.; Oesterling, A.; Srinivas, S.; Calmon, F.; and and scene classification. In Proceedings of the European
+Lakkaraju, H. 2024. Interpreting clip with sparse linear con- conference on computer vision (ECCV), 563–579.
+cept embeddings (splice). Advances in Neural Information Oikarinen, T.; Das, S.; Nguyen, L. M.; and Weng, T.-W.
+Processing Systems, 37: 84298–84328. 2023. Label-free Concept Bottleneck Models. In The
+Clark, B.; Kerrigan, A.; Kulkarni, P. P.; Cepeda, V. V.; and Eleventh International Conference on Learning Represen-
+Shah, M. 2023. Where we are and what we’re looking at: tations.
+Query based worldwide image geo-localization using hierar- Parekh, J.; Khayatan, P.; Shukor, M.; Newson, A.; and Cord,
+chies and scenes. In Proceedings of the IEEE/CVF Confer- M. 2024. A concept-based explainability framework for
+ence on Computer Vision and Pattern Recognition, 23182– large multimodal models. Advances in Neural Information
+23190. Processing Systems, 37: 135783–135818.
+Dsouza, A.; Tempelmeier, N.; Yu, R.; Gottschalk, S.; and Pramanick, S.; Nowara, E. M.; Gleason, J.; Castillo, C. D.;
+Demidova, E. 2021. Worldkg: A world-scale geographic and Chellappa, R. 2022. Where in the world is this image?
+knowledge graph. In Proceedings of the 30th ACM Inter- transformer-based geo-localization in the wild. In European
+national Conference on Information & Knowledge Manage- Conference on Computer Vision, 196–215. Springer.
+ment, 4475–4484. Radford, A.; Kim, J. W.; Hallacy, C.; Ramesh, A.; Goh, G.;
+Ghorbani, A.; Wexler, J.; Zou, J. Y.; and Kim, B. 2019. To- Agarwal, S.; Sastry, G.; Askell, A.; Mishkin, P.; Clark, J.;
+wards automatic concept-based explanations. Advances in et al. 2021. Learning transferable visual models from nat-
+Neural Information Processing Systems, 32. ural language supervision. In International conference on
+Hays, J.; and Efros, A. A. 2008. Im2gps: estimating geo- machine learning, 8748–8763. PmLR.
+graphic information from a single image. In Proceedings of Roberts, J.; Lüddecke, T.; Das, S.; Han, K.; and Albanie, S.
+the IEEE/CVF Conference on Computer Vision and Pattern 2023. GPT4GEO: How a language model sees the world’s
+Recognition, 1–8. IEEE. geography. arXiv preprint arXiv:2306.00020.
+Hooker, J.; Duveiller, G.; and Cescatti, A. 2018. A global Ruiz Luyten, M.; and van der Schaar, M. 2024. A theoret-
+dataset of air temperature derived from satellite remote sens- ical design of concept sets: improving the predictability of
+ing and weather stations. Scientific data, 5(1): 1–11. concept bottleneck models. Advances in Neural Information
+Jia, P.; Liu, Y.; Li, X.; Zhao, X.; Wang, Y.; Du, Y.; Han, Processing Systems, 37: 100160–100195.
+X.; Wei, X.; Wang, S.; and Yin, D. 2024. G3: an effective Rußwurm, M.; Wang, S.; Korner, M.; and Lobell, D. 2020.
+and adaptive framework for worldwide geolocalization us- Meta-learning for few-shot land cover classification. In Pro-
+ing large multi-modality models. Advances in Neural Infor- ceedings of the IEEE/CVF Conference on Computer Vision
+mation Processing Systems, 37: 53198–53221. and Pattern Recognition workshops, 200–201.
+
+
+
+Sathianarayanan, M.; Hsu, P.-H.; and Chang, C.-C. 2024. Yang, H.; Lu, X.; and Zhu, Y. 2021. Cross-view geo-
+Extracting disaster location identification from social media localization with layer-to-layer transformer. Advances in
+images using deep learning. International Journal of Disas- Neural Information Processing Systems, 34: 29009–29020.
+ter Risk Reduction, 104: 104352. Yang, Y.; Panagopoulou, A.; Zhou, S.; Jin, D.; Callison-
+Seo, P. H.; Weyand, T.; Sim, J.; and Han, B. 2018. Cplanet: Burch, C.; and Yatskar, M. 2023. Language in a bottle: Lan-
+Enhancing image geolocalization by combinatorial parti- guage model guided concept bottlenecks for interpretable
+tioning of maps. In Proceedings of the European Conference image classification. In Proceedings of the IEEE/CVF
+on Computer Vision (ECCV), 536–551. Conference on Computer Vision and Pattern Recognition,
+Shi, Y.; Yu, X.; Campbell, D.; and Li, H. 2020. Where 19187–19197.
+am i looking at? joint location and orientation estimation by Ye, J.; Lin, H.; Ou, L.; Chen, D.; Wang, Z.; Zhu, Q.; He,
+cross-view matching. In Proceedings of the IEEE/CVF Con- C.; and Li, W. 2024. Where am I? Cross-View Geo-
+ference on Computer Vision and Pattern Recognition, 4064– localization with Natural Language Descriptions. arXiv
+4072. preprint arXiv:2412.17007.
+Theiner, J.; Müller-Budack, E.; and Ewerth, R. 2022. Inter- Yeh, C.-K.; Kim, B.; Arik, S.; Li, C.-L.; Pfister, T.; and
+pretable semantic photo geolocation. In Proceedings of the Ravikumar, P. 2020. On completeness-aware concept-based
+IEEE/CVF Winter Conference on Applications of Computer explanations in deep neural networks. Advances in Neural
+Vision, 750–760. Information Processing Systems, 33: 20554–20565.
+Thomee, B.; Shamma, D. A.; Friedland, G.; Elizalde, B.; Ni, Yin, W.; Xiao, Z.; Zhou, P.; Yu, S.; Shen, J.; Sonke, J.-J.; and
+K.; Poland, D.; Borth, D.; and Li, L.-J. 2016. Yfcc100m: Gavves, E. 2025. Distributional Vision-Language Align-
+The new data in multimedia research. Communications of ment by Cauchy-Schwarz Divergence. arXiv:2502.17028.
+the ACM, 59(2): 64–73. Yuksekgonul, M.; Wang, M.; and Zou, J. 2022. Post-hoc
+Tian, Y.; Chen, C.; and Shah, M. 2017. Cross-view im- Concept Bottleneck Models. In The Eleventh International
+age matching for geo-localization in urban environments. In Conference on Learning Representations.
+Proceedings of the IEEE/CVF Conference on Computer Vi- Zhong, Y.; Yang, J.; Zhang, P.; Li, C.; Codella, N.; Li, L. H.;
+sion and Pattern Recognition, 3608–3616. Zhou, L.; Dai, X.; Yuan, L.; Li, Y.; et al. 2022. Regionclip:
+
+Region-based language-image pretraining. In Proceedings
+Van Horn, G.; Mac Aodha, O.; Song, Y.; Cui, Y.; Sun, C.; of the IEEE/CVF Conference on Computer Vision and Pat-
+Shepard, A.; Adam, H.; Perona, P.; and Belongie, S. 2018. tern Recognition, 16793–16803.
+The inaturalist species classification and detection dataset.
+In Proceedings of the IEEE/CVF Conference on Computer Zhou, Z.; Zhang, J.; Guan, Z.; Hu, M.; Lao, N.; Mu, L.; Li,
+Vision and Pattern Recognition, 8769–8778. S.; and Mai, G. 2024. Img2Loc: Revisiting image geolocal-
+
+ization using multi-modality foundation models and image-
+Vivanco Cepeda, V.; Nayak, G. K.; and Shah, M. 2023. Geo- based retrieval-augmented generation. In Proceedings of the
+clip: Clip-inspired alignment between locations and images 47th international acm sigir conference on research and de-
+for effective worldwide geo-localization. Advances in Neu- velopment in information retrieval, 2749–2754.
+ral Information Processing Systems, 36: 8690–8701. Zhu, S.; Yang, L.; Chen, C.; Shah, M.; Shen, X.; and
+Vo, N.; Jacobs, N.; and Hays, J. 2017. Revisiting im2gps in Wang, H. 2023. R2former: Unified retrieval and rerank-
+the deep learning era. In Proceedings of the IEEE interna- ing transformer for place recognition. In Proceedings of
+tional conference on computer vision, 2621–2630. the IEEE/CVF Conference on Computer Vision and Pattern
+Wang, C.; Pan, X.; Pan, Z.; Wang, H.; and Song, Y. Recognition, 19370–19380.
+2025. GRE Suite: Geo-localization Inference via Fine-
+Tuned Vision-Language Models and Enhanced Reasoning
+Chains. arXiv preprint arXiv:2505.18700.
+Weyand, T.; Kostrikov, I.; and Philbin, J. 2016. Planet-photo
+geolocation with convolutional neural networks. In Euro-
+pean conference on computer vision, 37–55. Springer.
+Workman, S.; Souvenir, R.; and Jacobs, N. 2015. Wide-area
+image geolocalization with aerial reference imagery. In Pro-
+ceedings of the IEEE International Conference on Computer
+Vision, 3961–3969.
+Xu, S.; Zhang, C.; Fan, L.; Meng, G.; Xiang, S.; and Ye, J.
+2024. Addressclip: Empowering vision-language models for
+city-wide image address localization. In European Confer-
+ence on Computer Vision, 76–92. Springer.
+Yamaguchi, S.; and Nishida, K. 2025. Explanation Bottle-
+neck Models. In Proceedings of the AAAI Conference on
+Artificial Intelligence, volume 39, 21886–21894.

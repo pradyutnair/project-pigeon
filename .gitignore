@@ -18,3 +18,6 @@ serving/static/
 .tensorboard-info/*
 .vscode/*
 *.arrow
+data/6906237dc7731161a37282b2/
+wandb/
+runs/
