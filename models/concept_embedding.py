@@ -38,8 +38,10 @@ class ConceptEmbeddingModule(nn.Module):
         concept_bank: torch.Tensor,
         hidden_dim: int = 512,
         dropout: float = 0.1,
-        temperature: float = 0.07,
-        learnable_temperature: bool = True
+        temperature: float = 1.0,
+        learnable_temperature: bool = True,
+        temp_min: float = 0.01,
+        temp_max: float = 5.0
     ):
         """
         Initialize CEM.
@@ -49,8 +51,10 @@ class ConceptEmbeddingModule(nn.Module):
             concept_bank: Pre-computed concept embeddings of shape (num_concepts, concept_dim)
             hidden_dim: Hidden dimension in MLP projector
             dropout: Dropout probability
-            temperature: Temperature for cosine similarity scaling
+            temperature: Initial temperature for cosine similarity scaling (default: 1.0)
             learnable_temperature: Whether temperature is learnable
+            temp_min: Minimum temperature value (prevents exploding logits)
+            temp_max: Maximum temperature value (prevents vanishing gradients)
         """
         super().__init__()
         
@@ -67,7 +71,11 @@ class ConceptEmbeddingModule(nn.Module):
             nn.Linear(hidden_dim, self.concept_dim),
         )
         
-        # Temperature parameter
+        # Temperature parameter with clamping bounds
+        self.temp_min = temp_min
+        self.temp_max = temp_max
+        self.learnable_temperature = learnable_temperature
+        
         if learnable_temperature:
             self.temperature = nn.Parameter(torch.tensor(temperature))
         else:
@@ -78,6 +86,7 @@ class ConceptEmbeddingModule(nn.Module):
         print(f"  Concept dim: {self.concept_dim}")
         print(f"  Num concepts: {self.num_concepts}")
         print(f"  Hidden dim: {hidden_dim}")
+        print(f"  Temperature: {temperature} (learnable={learnable_temperature}, range=[{temp_min}, {temp_max}])")
     
     def forward(
         self, 
@@ -100,10 +109,15 @@ class ConceptEmbeddingModule(nn.Module):
         projected = self.projector(image_features)  # (B, concept_dim)
         projected = F.normalize(projected, dim=-1)
         
+        # Clamp temperature to prevent numerical instability
+        # Small temp -> huge logits -> unstable gradients
+        # Large temp -> flat logits -> slow learning
+        temp = self.temperature.clamp(min=self.temp_min, max=self.temp_max)
+        
         # Compute concept activations via cosine similarity
         # concept_bank: (num_concepts, concept_dim)
         # projected: (B, concept_dim)
-        concept_logits = projected @ self.concept_bank.T / self.temperature  # (B, num_concepts)
+        concept_logits = projected @ self.concept_bank.T / temp  # (B, num_concepts)
         
         # Sigmoid gives interpretable [0, 1] activations
         concept_activations = torch.sigmoid(concept_logits)

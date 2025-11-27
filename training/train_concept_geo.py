@@ -531,12 +531,21 @@ def train_stage(
         weight_decay=weight_decay
     )
     
-    # Scheduler
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=num_epochs,
-        eta_min=learning_rate * 0.01
-    )
+    # Warmup + Cosine Annealing scheduler
+    # Warmup for first 3 epochs (or 10% of epochs, whichever is larger)
+    warmup_epochs = max(3, int(num_epochs * 0.1))
+    
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            # Linear warmup from 0.1 * lr to lr
+            return 0.1 + 0.9 * (epoch / warmup_epochs)
+        else:
+            # Cosine annealing after warmup
+            progress = (epoch - warmup_epochs) / (num_epochs - warmup_epochs)
+            return 0.01 + 0.99 * 0.5 * (1 + np.cos(np.pi * progress))
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    print(f"Using warmup for {warmup_epochs} epochs, then cosine annealing")
     
     best_epoch = 0
     best_metrics = {}
@@ -778,26 +787,33 @@ def main(args):
     print(f"Total parameters: {total_params:,}")
     
     # ============================================
-    # 3.5 COMPUTE CLASS WEIGHTS FOR IMBALANCE
+    # 3.5 COMPUTE CLASS WEIGHTS FOR IMBALANCE (optional)
     # ============================================
-    print("\nComputing class weights for concept imbalance...")
-    class_weights = compute_class_weights(
-        train_samples,
-        num_classes=len(concept_to_idx),
-        strategy=args.class_weight_strategy,
-        smoothing=0.1
-    )
-    class_weights = class_weights.to(device)
-    
     # Print class distribution info
     from collections import Counter
     concept_counts = Counter(s.get('concept_idx', 0) for s in train_samples)
     most_common = concept_counts.most_common(5)
     least_common = concept_counts.most_common()[-5:]
+    print(f"\nClass distribution:")
     print(f"  Most common concepts: {[(idx_to_concept.get(c, c), n) for c, n in most_common]}")
     print(f"  Least common concepts: {[(idx_to_concept.get(c, c), n) for c, n in least_common]}")
-    print(f"  Class weight range: {class_weights.min():.2f} - {class_weights.max():.2f}")
-    print(f"  Using focal loss: {args.use_focal_loss} (gamma={args.focal_gamma})")
+    
+    # Compute class weights only if strategy is not "none"
+    if args.class_weight_strategy != "none":
+        print(f"Computing class weights (strategy: {args.class_weight_strategy})...")
+        class_weights = compute_class_weights(
+            train_samples,
+            num_classes=len(concept_to_idx),
+            strategy=args.class_weight_strategy,
+            smoothing=0.1
+        )
+        class_weights = class_weights.to(device)
+        print(f"  Class weight range: {class_weights.min():.2f} - {class_weights.max():.2f}")
+    else:
+        class_weights = None
+        print("No class weights (using focal loss only for imbalance handling)")
+    
+    print(f"Using focal loss: {args.use_focal_loss} (gamma={args.focal_gamma})")
     
     # Log additional config to wandb
     if log_wandb:
@@ -948,14 +964,15 @@ Examples:
                         help="Use focal loss for concept classification (default: True)")
     parser.add_argument("--no-focal-loss", dest="use_focal_loss", action="store_false",
                         help="Disable focal loss, use standard cross-entropy")
-    parser.add_argument("--focal-gamma", type=float, default=2.0,
-                        help="Gamma for focal loss (higher = more focus on hard examples)")
-    parser.add_argument("--class-weight-strategy", type=str, default="inverse_sqrt",
-                        choices=["inverse_freq", "inverse_sqrt", "effective_num"],
-                        help="Strategy for computing class weights: "
+    parser.add_argument("--focal-gamma", type=float, default=1.0,
+                        help="Gamma for focal loss (0=standard CE, 1=gentle, 2=aggressive). Default: 1.0")
+    parser.add_argument("--class-weight-strategy", type=str, default="none",
+                        choices=["none", "inverse_freq", "inverse_sqrt", "effective_num"],
+                        help="Strategy for computing class weights (default: none). "
+                             "Options: none (focal loss only), "
                              "inverse_freq (1/freq), "
-                             "inverse_sqrt (1/sqrt(freq), less aggressive), "
-                             "effective_num (from Class-Balanced Loss paper)")
+                             "inverse_sqrt (1/sqrt(freq)), "
+                             "effective_num (Class-Balanced Loss paper)")
     
     # Output arguments
     parser.add_argument("--output-dir", type=str, default="runs",
