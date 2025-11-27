@@ -3,102 +3,102 @@
 # Install with: pip install -r requirements.txt
 
 # Core Deep Learning & ML
-torch>=1.12.0,<2.0.0
-torchvision>=0.13.0,<0.20.0
-torchaudio>=0.12.0
-transformers>=4.23.0,<5.0.0
-accelerate>=0.13.0
-datasets>=2.6.0
-tokenizers>=0.13.0
+torch
+torchvision
+torchaudio
+transformers
+accelerate
+datasets
+tokenizers
 
 # Model Interpretability
-captum>=0.5.0
+captum
 
 # Data Processing & Scientific Computing
 # IMPORTANT: NumPy <2.0.0 required for pygeos compatibility
-numpy>=1.21.0,<2.0.0
-pandas>=1.4.0
-scipy>=1.9.0
-scikit-learn>=1.1.0
-joblib>=1.0.0
+numpy
+pandas
+scipy
+scikit-learn
+joblib
 
 # Geospatial Libraries
-geopandas>=0.11.0
-shapely>=1.8.0,<2.0.0
-pygeos>=0.14.0
-pyproj>=3.0.0
-fiona>=1.8.0
-rasterio>=1.4.0
-georasters>=0.5.23
-geopy>=2.3.0
-reverse-geocoder>=1.5.0
-srtm-py>=0.3.7
-latlon-utils>=0.0.7
-folium>=0.13.0
+geopandas
+shapely
+pyproj
+fiona
+rasterio
+georasters
+geopy
+reverse-geocoder
+srtm-py
+latlon-utils
+folium
 
 # Image Processing
-Pillow>=9.0.0
-opencv-python>=4.6.0
+Pillow
+opencv-python
 
 # Parallel Processing
-pandarallel>=1.6.0
+pandarallel
 
 # Visualization
-matplotlib>=3.5.0
-seaborn>=0.12.0
+matplotlib
+seaborn
 
 # Web Framework (for API endpoints)
-fastapi>=0.88.0
-uvicorn>=0.19.0
-python-multipart>=0.0.0
+fastapi
+uvicorn
+python-multipart
 
 # Utilities
-tqdm>=4.64.0
-ftfy>=6.1.0
-python-datauri>=1.1.0
-huggingface-hub>=0.10.0
+tqdm
+ftfy
+python-datauri
+huggingface-hub
 
 # Model Utilities
-torch-summary>=1.4.5
-torch-tb-profiler>=0.4.0
+torch-summary
+torch-tb-profiler
 
 # TensorBoard
-tensorboard>=2.9.0
-tensorboard-data-server>=0.6.0
-tensorboard-plugin-wit>=1.8.0
-tensorboard-plugin-profile>=2.8.0
+tensorboard
+tensorboard-data-server
+tensorboard-plugin-wit
+tensorboard-plugin-profile
 
 # Jupyter (optional, for notebooks)
-ipython>=8.3.0
-ipywidgets>=7.6.5
-jupyter>=1.0.0
-jupyter-contrib-core>=0.4.0
-jupyter-contrib-nbextensions>=0.5.0
-jupyter-highlight-selected-word>=0.2.0
-jupyter-latex-envs>=1.4.6
-jupyter-nbextensions-configurator>=0.5.0
-matplotlib-inline>=0.1.2
-nbconvert>=6.4.0
-nbformat>=5.3.0
-notebook>=6.4.0
+ipython
+ipywidgets
+jupyter
+jupyter-contrib-core
+jupyter-contrib-nbextensions
+jupyter-highlight-selected-word
+jupyter-latex-envs
+jupyter-nbextensions-configurator
+matplotlib-inline
+nbconvert
+nbformat
+notebook
 
 # System & Build
-setuptools>=65.0.0
-wheel>=0.35.0
-pip>=22.0.0
+setuptools
+wheel
+pip
 
 # HTTP & Networking
-requests>=2.27.0
-urllib3>=1.26.0,<2.0.0
-certifi>=2018.11.29
-charset-normalizer>=2.0.0
-idna>=3.0.0
+requests
+urllib3
+certifi
+charset-normalizer
+idna
 
 # Other Dependencies
-pynvml>=11.4.0
-jinja2>=3.0.0
-markupsafe>=2.1.0
-tornado>=6.1.0
+pynvml
+jinja2
+markupsafe
+tornado
 
 geoclip
+wandb
 

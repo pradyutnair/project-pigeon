@@ -674,7 +674,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test PanoramaCBMDataset")
     parser.add_argument("--geoguessr-id", type=str, default="6906237dc7731161a37282b2",
                         help="GeoGuessr map ID")
-    parser.add_argument("--data-root", type=str, default="data",
+    parser.add_argument("--data-root", type=str, default="/teamspace/studios/this_studio/project-pigeon/data",
                         help="Root directory for data")
     parser.add_argument("--country", type=str, default="Australia",
                         help="Country filter")

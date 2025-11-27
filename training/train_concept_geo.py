@@ -204,6 +204,8 @@ def log_sample_predictions(
                     gt_concept,
                     pred_concept,
                     is_correct,
+                    gt_coord,
+                    pred_coord,
                     f"{distance:.1f}",
                     metadata[i].get('country', 'Unknown'),
                     ", ".join([f"{c}: {a:.2f}" for c, a in zip(top_concepts[:3], top_activations[:3])])
@@ -211,7 +213,7 @@ def log_sample_predictions(
                 samples_logged += 1
     
     if WANDB_AVAILABLE and wandb.run is not None:
-        columns = ["pano_id", "gt_concept", "pred_concept", "correct", "distance_km", "country", "top_concepts"]
+        columns = ["pano_id", "gt_concept", "pred_concept", "correct", "gt_coord", "pred_coord", "distance_km", "country", "top_concepts"]
         table = wandb.Table(columns=columns, data=table_data)
         wandb.log({"predictions": table})
     
@@ -921,7 +923,7 @@ Examples:
     )
     
     # Data arguments
-    parser.add_argument("--data-root", type=str, default="data",
+    parser.add_argument("--data-root", type=str, default="project-pigeon/data",
                         help="Root directory for data")
     parser.add_argument("--geoguessr-id", type=str, default="6906237dc7731161a37282b2",
                         help="GeoGuessr map ID")
@@ -946,7 +948,7 @@ Examples:
                         help="Number of epochs for concept stage")
     parser.add_argument("--geocell-epochs", type=int, default=50,
                         help="Number of epochs for geocell stage")
-    parser.add_argument("--batch-size", type=int, default=32,
+    parser.add_argument("--batch-size", type=int, default=64,
                         help="Batch size")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
                         help="Learning rate")

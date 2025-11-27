@@ -1,6 +1,5 @@
 import os
 import logging
-import pygeos
 import torch
 import numpy as np
 import pandas as pd
@@ -10,6 +9,7 @@ from geopandas import GeoDataFrame
 from torch import Tensor
 from typing import Dict, List, Any
 from shapely.geometry import Point
+from shapely.errors import GEOSException
 from datasets import DatasetDict
 from transformers import AutoFeatureExtractor
 from config import *
@@ -81,7 +81,7 @@ def generate_cell_labels(point: Point, geocell_df: GeoDataFrame,
             else:
                 return indices[0]
 
-    except pygeos.GEOSException:
+    except GEOSException:
         print(f'Point {point} could not be assigned to a geocell.')
         pass
         
