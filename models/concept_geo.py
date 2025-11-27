@@ -123,17 +123,76 @@ class ConceptGeo(nn.Module):
         print(f"  Num geocells: {num_geocells}")
         print(f"  Top-k: {top_k}")
     
-    def trainable_parameters(self):
-        """Return only trainable parameters (not frozen backbone)."""
+    def trainable_parameters(self, stage: str = "all"):
+        """
+        Return trainable parameters based on training stage.
+        
+        Args:
+            stage: "concept" - only concept head params
+                   "geocell" - only geocell head params
+                   "all" - both heads
+        """
         params = []
-        params.extend(self.concept_module.parameters())
-        params.extend(self.geocell_head.parameters())
+        if stage in ["concept", "all"]:
+            params.extend(self.concept_module.parameters())
+        if stage in ["geocell", "all"]:
+            params.extend(self.geocell_head.parameters())
         return params
     
     def freeze_backbone(self):
         """Ensure backbone is frozen."""
         for param in self.backbone.parameters():
             param.requires_grad = False
+    
+    def freeze_concept_head(self):
+        """Freeze concept embedding module."""
+        for param in self.concept_module.parameters():
+            param.requires_grad = False
+        print("Concept head frozen")
+    
+    def unfreeze_concept_head(self):
+        """Unfreeze concept embedding module."""
+        for param in self.concept_module.parameters():
+            param.requires_grad = True
+        print("Concept head unfrozen")
+    
+    def freeze_geocell_head(self):
+        """Freeze geocell classification head."""
+        for param in self.geocell_head.parameters():
+            param.requires_grad = False
+        print("Geocell head frozen")
+    
+    def unfreeze_geocell_head(self):
+        """Unfreeze geocell classification head."""
+        for param in self.geocell_head.parameters():
+            param.requires_grad = True
+        print("Geocell head unfrozen")
+    
+    def set_training_stage(self, stage: str):
+        """
+        Configure model for a specific training stage.
+        
+        Args:
+            stage: "concept" - train only concept head
+                   "geocell" - train only geocell head (concept frozen)
+                   "all" - train both heads
+                   "finetune" - fine-tune all with lower lr on concept
+        """
+        self.freeze_backbone()  # Always frozen
+        
+        if stage == "concept":
+            self.unfreeze_concept_head()
+            self.freeze_geocell_head()
+        elif stage == "geocell":
+            self.freeze_concept_head()
+            self.unfreeze_geocell_head()
+        elif stage in ["all", "finetune"]:
+            self.unfreeze_concept_head()
+            self.unfreeze_geocell_head()
+        else:
+            raise ValueError(f"Unknown stage: {stage}")
+        
+        print(f"Training stage set to: {stage}")
     
     def forward(
         self,

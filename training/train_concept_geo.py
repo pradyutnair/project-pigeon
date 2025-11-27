@@ -2,18 +2,16 @@
 """
 Training script for ConceptGeo model with WandB logging.
 
-Finetunes concept and geocell heads on GeoGuessr meta dataset
-using frozen GeoCLIP backbone.
+Two-stage curriculum training (automatic):
+1. Stage 1 (Concept): Train concept embedding head to convergence
+2. Stage 2 (Distance): Freeze concept head, train geocell head
 
-Multi-objective training:
-1. Concept classification (metaName supervision)
-2. Geocell classification (with label smoothing)
-3. Image-Note contrastive alignment
+The training automatically runs both stages sequentially.
 
 Usage:
     python training/train_concept_geo.py --data-root data --geoguessr-id 6906237dc7731161a37282b2
-    python training/train_concept_geo.py --wandb-project conceptgeo --wandb-name exp1
-    python training/train_concept_geo.py --no-wandb  # disable logging
+    python training/train_concept_geo.py --concept-epochs 30 --geocell-epochs 50
+    python training/train_concept_geo.py --country-filter Japan  # Train on specific country
 """
 
 import os
@@ -68,7 +66,9 @@ from training.losses import (
     ConceptGeoLoss,
     concept_classification_loss,
     image_note_contrastive_loss,
-    compute_accuracy
+    compute_accuracy,
+    compute_class_weights,
+    FocalLoss
 )
 
 
@@ -226,9 +226,25 @@ def train_epoch(
     device: torch.device,
     epoch: int,
     geocell_coords: torch.Tensor,
+    stage: str = "all",
     log_wandb: bool = True
 ) -> Dict[str, float]:
-    """Train for one epoch with optional wandb logging."""
+    """
+    Train for one epoch with optional wandb logging.
+    
+    Args:
+        model: ConceptGeo model
+        train_loader: Training data loader
+        criterion: Loss function
+        optimizer: Optimizer
+        device: Device
+        epoch: Current epoch
+        geocell_coords: Geocell coordinates
+        stage: "concept" - only concept loss
+               "geocell" - only geocell loss
+               "all" - both losses
+        log_wandb: Whether to log to wandb
+    """
     model.train()
     
     total_loss = 0
@@ -238,7 +254,8 @@ def train_epoch(
     correct_concepts = 0
     total_samples = 0
     
-    pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
+    stage_desc = {"concept": "[Concept Stage]", "geocell": "[Distance Stage]", "all": "[Joint]"}
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch} {stage_desc.get(stage, '')}")
     
     for batch_idx, batch in enumerate(pbar):
         images, concept_idx, country_idx, coords, metadata = batch
@@ -247,40 +264,65 @@ def train_epoch(
         concept_idx = concept_idx.to(device)
         coords = coords.to(device)
         
-        # Extract notes
+        # Extract notes (only used in concept stage)
         notes = [m['note'] for m in metadata]
         
         # Forward pass
         outputs = model(images)
         
-        # Encode notes
+        # Encode notes for contrastive loss (concept stage only)
         note_features = None
         note_mask = None
-        valid_notes = [n for n in notes if len(n.strip()) > 0]
+        if stage in ["concept", "all"]:
+            valid_notes = [n for n in notes if len(n.strip()) > 0]
+            if len(valid_notes) > 1:
+                note_mask = torch.tensor([len(n.strip()) > 0 for n in notes], device=device)
+                note_features = model.encode_notes(valid_notes)
         
-        if len(valid_notes) > 1:
-            note_mask = torch.tensor([len(n.strip()) > 0 for n in notes], device=device)
-            note_features = model.encode_notes(valid_notes)
-        
-        # Compute loss
         # Convert coords from (lat, lng) to (lng, lat) for geocell loss
-        gt_coords_lnglat = coords[:, [1, 0]]  # Swap columns
+        gt_coords_lnglat = coords[:, [1, 0]]
         
-        loss, loss_dict = criterion(
-            concept_logits=outputs.concept_logits,
-            concept_labels=concept_idx,
-            geocell_logits=outputs.geocell_logits,
-            gt_coords=gt_coords_lnglat,
-            geocell_coords=geocell_coords,
-            image_features=outputs.image_features,
-            note_features=note_features,
-            note_mask=note_mask
-        )
+        # Compute stage-specific loss
+        if stage == "concept":
+            # Only concept classification + contrastive alignment
+            loss, loss_dict = criterion(
+                concept_logits=outputs.concept_logits,
+                concept_labels=concept_idx,
+                geocell_logits=None,  # Skip geocell loss
+                gt_coords=None,
+                geocell_coords=None,
+                image_features=outputs.image_features,
+                note_features=note_features,
+                note_mask=note_mask
+            )
+        elif stage == "geocell":
+            # Only geocell classification
+            loss, loss_dict = criterion(
+                concept_logits=None,  # Skip concept loss
+                concept_labels=None,
+                geocell_logits=outputs.geocell_logits,
+                gt_coords=gt_coords_lnglat,
+                geocell_coords=geocell_coords,
+                image_features=None,
+                note_features=None,
+                note_mask=None
+            )
+        else:  # "all"
+            loss, loss_dict = criterion(
+                concept_logits=outputs.concept_logits,
+                concept_labels=concept_idx,
+                geocell_logits=outputs.geocell_logits,
+                gt_coords=gt_coords_lnglat,
+                geocell_coords=geocell_coords,
+                image_features=outputs.image_features,
+                note_features=note_features,
+                note_mask=note_mask
+            )
         
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.trainable_parameters(stage), max_norm=1.0)
         optimizer.step()
         
         # Track metrics
@@ -289,16 +331,27 @@ def train_epoch(
         total_geocell_loss += loss_dict['geocell']
         total_contrastive_loss += loss_dict['contrastive']
         
-        # Concept accuracy
+        # Concept accuracy (always track for monitoring)
         pred_concepts = outputs.concept_logits.argmax(dim=-1)
         correct_concepts += (pred_concepts == concept_idx).sum().item()
         total_samples += images.shape[0]
         
         # Update progress bar
-        pbar.set_postfix({
-            'loss': f"{loss_dict['total']:.4f}",
-            'concept_acc': f"{correct_concepts/total_samples:.2%}"
-        })
+        if stage == "concept":
+            pbar.set_postfix({
+                'concept_loss': f"{loss_dict['concept']:.4f}",
+                'concept_acc': f"{correct_concepts/total_samples:.2%}"
+            })
+        elif stage == "geocell":
+            pbar.set_postfix({
+                'geocell_loss': f"{loss_dict['geocell']:.4f}",
+                'concept_acc': f"{correct_concepts/total_samples:.2%}"
+            })
+        else:
+            pbar.set_postfix({
+                'loss': f"{loss_dict['total']:.4f}",
+                'concept_acc': f"{correct_concepts/total_samples:.2%}"
+            })
         
         # Log batch metrics to wandb
         if log_wandb and WANDB_AVAILABLE and wandb.run is not None and batch_idx % 10 == 0:
@@ -403,30 +456,210 @@ def evaluate(
     return metrics
 
 
+def train_stage(
+    model: ConceptGeo,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    geocell_coords: torch.Tensor,
+    idx_to_concept: Dict[int, str],
+    device: torch.device,
+    output_dir: Path,
+    stage: str,
+    num_epochs: int,
+    learning_rate: float,
+    weight_decay: float,
+    lambda_contrastive: float,
+    log_wandb: bool = True,
+    class_weights: Optional[torch.Tensor] = None,
+    use_focal_loss: bool = True,
+    focal_gamma: float = 2.0
+) -> Dict[str, float]:
+    """
+    Train a single stage (concept or geocell).
+    
+    Args:
+        class_weights: Pre-computed class weights for concept imbalance
+        use_focal_loss: Whether to use focal loss for concept stage
+        focal_gamma: Gamma parameter for focal loss
+    
+    Returns:
+        best_metrics: Dictionary of best metrics from this stage
+    """
+    print("\n" + "="*60)
+    stage_names = {"concept": "STAGE 1: CONCEPT EMBEDDING", "geocell": "STAGE 2: DISTANCE PREDICTION"}
+    print(f"{stage_names.get(stage, stage)}")
+    print("="*60)
+    
+    # Set model training stage
+    model.set_training_stage(stage)
+    
+    # Count trainable parameters
+    trainable_params = sum(p.numel() for p in model.trainable_parameters(stage))
+    print(f"Trainable parameters: {trainable_params:,}")
+    
+    # Loss function with class balancing for concept stage
+    if stage == "concept":
+        criterion = ConceptGeoLoss(
+            lambda_concept=1.0,
+            lambda_geocell=0.0,
+            lambda_contrastive=lambda_contrastive,
+            use_label_smoothing=True,
+            smoothing_constant=65.0,
+            class_weights=class_weights,
+            use_focal_loss=use_focal_loss,
+            focal_gamma=focal_gamma
+        )
+        best_metric_name = "val/concept_acc_top1"
+        best_metric_val = 0
+        metric_higher_is_better = True
+    else:  # geocell
+        criterion = ConceptGeoLoss(
+            lambda_concept=0.0,
+            lambda_geocell=1.0,
+            lambda_contrastive=0.0,
+            use_label_smoothing=True,
+            smoothing_constant=65.0
+        )
+        best_metric_name = "val/median_distance_km"
+        best_metric_val = float('inf')
+        metric_higher_is_better = False
+    
+    # Optimizer
+    optimizer = AdamW(
+        model.trainable_parameters(stage),
+        lr=learning_rate,
+        weight_decay=weight_decay
+    )
+    
+    # Scheduler
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=num_epochs,
+        eta_min=learning_rate * 0.01
+    )
+    
+    best_epoch = 0
+    best_metrics = {}
+    
+    for epoch in range(1, num_epochs + 1):
+        print(f"\n--- {stage.upper()} Epoch {epoch}/{num_epochs} ---")
+        
+        # Train
+        train_metrics = train_epoch(
+            model, train_loader, criterion, optimizer,
+            device, epoch, geocell_coords,
+            stage=stage, log_wandb=log_wandb
+        )
+        
+        # Evaluate
+        val_metrics = evaluate(
+            model, val_loader, criterion, device, geocell_coords
+        )
+        
+        scheduler.step()
+        
+        # Combine metrics with stage prefix
+        metrics = {
+            **{f"{stage}/{k}": v for k, v in train_metrics.items()},
+            **{f"{stage}/{k}": v for k, v in val_metrics.items()},
+            'epoch': epoch,
+            'stage': stage,
+            'lr': scheduler.get_last_lr()[0]
+        }
+        
+        # Log to wandb
+        if log_wandb and WANDB_AVAILABLE and wandb.run is not None:
+            wandb.log(metrics)
+            if epoch % 10 == 0:
+                log_sample_predictions(model, val_loader, idx_to_concept, device, num_samples=20)
+        
+        # Print metrics
+        if stage == "concept":
+            print(f"  Loss: {train_metrics['train/concept_loss']:.4f}, "
+                  f"Concept Acc: {val_metrics['val/concept_acc_top1']:.2%} "
+                  f"(top-5: {val_metrics['val/concept_acc_top5']:.2%})")
+        else:
+            print(f"  Loss: {train_metrics['train/geocell_loss']:.4f}, "
+                  f"Median Dist: {val_metrics['val/median_distance_km']:.1f} km, "
+                  f"25km: {val_metrics['val/acc_25km']:.2%}, "
+                  f"200km: {val_metrics['val/acc_200km']:.2%}")
+        
+        # Check if best
+        current_metric = val_metrics[best_metric_name]
+        is_best = (metric_higher_is_better and current_metric > best_metric_val) or \
+                  (not metric_higher_is_better and current_metric < best_metric_val)
+        
+        if is_best:
+            best_metric_val = current_metric
+            best_epoch = epoch
+            best_metrics = val_metrics.copy()
+            
+            torch.save({
+                'epoch': epoch,
+                'stage': stage,
+                'model_state_dict': model.state_dict(),
+                'metrics': val_metrics
+            }, output_dir / f"best_{stage}.pt")
+            
+            if stage == "concept":
+                print(f"  ★ New best! (concept_acc={best_metric_val:.2%})")
+            else:
+                print(f"  ★ New best! (median_dist={best_metric_val:.1f} km)")
+            
+            if log_wandb and WANDB_AVAILABLE and wandb.run is not None:
+                wandb.run.summary[f'best_{stage}_epoch'] = epoch
+                wandb.run.summary[f'best_{stage}_{best_metric_name}'] = best_metric_val
+    
+    print(f"\n{stage.upper()} complete! Best at epoch {best_epoch}")
+    return best_metrics
+
+
 def main(args):
-    """Main training function with optional WandB logging."""
+    """Main training function - runs concept stage then geocell stage automatically."""
     
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Initialize wandb
-    log_wandb = WANDB_AVAILABLE and not args.no_wandb
-    if log_wandb:
-        wandb.init(
-            project=args.wandb_project,
-            name=args.wandb_name,
-            config=vars(args)
-        )
-        print(f"WandB logging enabled: {args.wandb_project}/{args.wandb_name or wandb.run.name}")
-    else:
-        print("WandB logging disabled")
-    
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(args.output_dir) / f"conceptgeo_{timestamp}"
+    date_str = datetime.now().strftime("%Y%m%d")
+    output_dir = Path(args.output_dir) / f"pigeon-cbm_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
+    
+    # Determine country filter for tags
+    country_filter = getattr(args, 'country_filter', None)
+    country_tag = country_filter if country_filter else "global"
+    
+    # Initialize wandb with auto-generated name and tags
+    log_wandb = WANDB_AVAILABLE and not args.no_wandb
+    if log_wandb:
+        run_name = f"pigeon-cbm-{timestamp}"
+        tags = [
+            args.backbone,                          # backbone type
+            f"geocells-{args.num_geocells}",       # num geocells
+            country_tag,                            # country or global
+            "curriculum-training",                  # training type
+            f"concept-{args.concept_epochs}ep",     # concept epochs
+            f"geocell-{args.geocell_epochs}ep",     # geocell epochs
+        ]
+        if args.lambda_contrastive > 0:
+            tags.append("contrastive-loss")
+        if args.use_focal_loss:
+            tags.append(f"focal-loss-g{args.focal_gamma}")
+        tags.append(f"weights-{args.class_weight_strategy}")
+        
+        wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            tags=tags,
+            config=vars(args)
+        )
+        print(f"WandB: {args.wandb_project}/{run_name}")
+        print(f"Tags: {tags}")
+    else:
+        print("WandB logging disabled")
     
     # Save args
     with open(output_dir / "args.json", "w") as f:
@@ -541,164 +774,143 @@ def main(args):
         use_concept_for_geocell=True
     ).to(device)
     
-    # Count parameters
-    trainable_params = sum(p.numel() for p in model.trainable_parameters())
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"Trainable parameters: {trainable_params:,} / {total_params:,}")
+    print(f"Total parameters: {total_params:,}")
     
     # ============================================
-    # 4. SETUP TRAINING
+    # 3.5 COMPUTE CLASS WEIGHTS FOR IMBALANCE
     # ============================================
-    print("\n" + "="*50)
-    print("Setting up training...")
-    print("="*50)
-    
-    # Loss function
-    criterion = ConceptGeoLoss(
-        lambda_concept=args.lambda_concept,
-        lambda_geocell=args.lambda_geocell,
-        lambda_contrastive=args.lambda_contrastive,
-        use_label_smoothing=True,
-        smoothing_constant=65.0
+    print("\nComputing class weights for concept imbalance...")
+    class_weights = compute_class_weights(
+        train_samples,
+        num_classes=len(concept_to_idx),
+        strategy=args.class_weight_strategy,
+        smoothing=0.1
     )
+    class_weights = class_weights.to(device)
     
-    # Optimizer (only trainable parameters)
-    optimizer = AdamW(
-        model.trainable_parameters(),
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay
-    )
-    
-    # Scheduler
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=args.epochs,
-        eta_min=args.learning_rate * 0.01
-    )
+    # Print class distribution info
+    from collections import Counter
+    concept_counts = Counter(s.get('concept_idx', 0) for s in train_samples)
+    most_common = concept_counts.most_common(5)
+    least_common = concept_counts.most_common()[-5:]
+    print(f"  Most common concepts: {[(idx_to_concept.get(c, c), n) for c, n in most_common]}")
+    print(f"  Least common concepts: {[(idx_to_concept.get(c, c), n) for c, n in least_common]}")
+    print(f"  Class weight range: {class_weights.min():.2f} - {class_weights.max():.2f}")
+    print(f"  Using focal loss: {args.use_focal_loss} (gamma={args.focal_gamma})")
     
     # Log additional config to wandb
     if log_wandb:
         wandb.config.update({
-            'trainable_params': trainable_params,
+            'total_params': total_params,
             'num_concepts': len(concept_to_idx),
             'num_train_samples': len(train_samples),
-            'num_val_samples': len(val_samples)
+            'num_val_samples': len(val_samples),
+            'use_focal_loss': args.use_focal_loss,
+            'focal_gamma': args.focal_gamma,
+            'class_weight_strategy': args.class_weight_strategy
         })
     
     # ============================================
-    # 5. TRAINING LOOP
+    # 4. STAGE 1: CONCEPT TRAINING
     # ============================================
-    print("\n" + "="*50)
-    print("Starting training...")
-    print("="*50)
+    concept_metrics = train_stage(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        geocell_coords=geocell_coords,
+        idx_to_concept=idx_to_concept,
+        device=device,
+        output_dir=output_dir,
+        stage="concept",
+        num_epochs=args.concept_epochs,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        lambda_contrastive=args.lambda_contrastive,
+        log_wandb=log_wandb,
+        class_weights=class_weights,
+        use_focal_loss=args.use_focal_loss,
+        focal_gamma=args.focal_gamma
+    )
     
-    best_val_acc = 0
-    best_epoch = 0
-    history = []
+    # Load best concept model before geocell training
+    print("\nLoading best concept model for geocell stage...")
+    checkpoint = torch.load(output_dir / "best_concept.pt", map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     
-    for epoch in range(1, args.epochs + 1):
-        print(f"\n--- Epoch {epoch}/{args.epochs} ---")
-        
-        # Train
-        train_metrics = train_epoch(
-            model, train_loader, criterion, optimizer, 
-            device, epoch, geocell_coords, log_wandb=log_wandb
-        )
-        
-        # Evaluate
-        val_metrics = evaluate(
-            model, val_loader, criterion, device, geocell_coords
-        )
-        
-        # Update scheduler
-        scheduler.step()
-        
-        # Combine metrics
-        metrics = {**train_metrics, **val_metrics, 'epoch': epoch, 'lr': scheduler.get_last_lr()[0]}
-        history.append(metrics)
-        
-        # Log to wandb
-        if log_wandb:
-            wandb.log(metrics)
-            
-            # Log sample predictions every 10 epochs
-            if epoch % 10 == 0:
-                log_sample_predictions(model, val_loader, idx_to_concept, device, num_samples=20)
-        
-        # Print metrics
-        print(f"Train Loss: {train_metrics['train/loss']:.4f}, "
-              f"Concept Acc: {train_metrics['train/concept_acc']:.2%}")
-        print(f"Val Loss: {val_metrics['val/loss']:.4f}, "
-              f"Concept Acc: {val_metrics['val/concept_acc_top1']:.2%} (top-5: {val_metrics['val/concept_acc_top5']:.2%})")
-        print(f"Median Distance: {val_metrics['val/median_distance_km']:.1f} km")
-        print(f"Distance Accuracies: "
-              f"1km={val_metrics['val/acc_1km']:.2%}, "
-              f"25km={val_metrics['val/acc_25km']:.2%}, "
-              f"200km={val_metrics['val/acc_200km']:.2%}")
-        
-        # Save best model
-        if val_metrics['val/concept_acc_top1'] > best_val_acc:
-            best_val_acc = val_metrics['val/concept_acc_top1']
-            best_epoch = epoch
-            
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'metrics': metrics
-            }, output_dir / "best_model.pt")
-            
-            print(f"  New best model saved! (concept_acc={best_val_acc:.2%})")
-            
-            if log_wandb:
-                wandb.run.summary['best_epoch'] = epoch
-                wandb.run.summary['best_concept_acc'] = best_val_acc
-                wandb.run.summary['best_median_distance_km'] = val_metrics['val/median_distance_km']
-        
-        # Save checkpoint every N epochs
-        if epoch % args.save_every == 0:
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'metrics': metrics
-            }, output_dir / f"checkpoint_epoch_{epoch}.pt")
+    # ============================================
+    # 5. STAGE 2: GEOCELL TRAINING
+    # ============================================
+    geocell_metrics = train_stage(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        geocell_coords=geocell_coords,
+        idx_to_concept=idx_to_concept,
+        device=device,
+        output_dir=output_dir,
+        stage="geocell",
+        num_epochs=args.geocell_epochs,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        lambda_contrastive=0.0,  # Not used in geocell stage
+        log_wandb=log_wandb
+    )
     
     # ============================================
     # 6. SAVE FINAL RESULTS
     # ============================================
-    print("\n" + "="*50)
-    print("Training complete!")
-    print("="*50)
+    print("\n" + "="*60)
+    print("TRAINING COMPLETE")
+    print("="*60)
     
-    # Save training history
-    with open(output_dir / "history.json", "w") as f:
-        json.dump(history, f, indent=2)
-    
-    # Save final model
+    # Save final model (with both heads trained)
     torch.save({
-        'epoch': args.epochs,
         'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'metrics': history[-1]
+        'concept_metrics': concept_metrics,
+        'geocell_metrics': geocell_metrics,
+        'config': vars(args)
     }, output_dir / "final_model.pt")
     
     # Finish wandb run
     if log_wandb:
+        wandb.run.summary['final_concept_acc'] = concept_metrics.get('val/concept_acc_top1', 0)
+        wandb.run.summary['final_median_distance_km'] = geocell_metrics.get('val/median_distance_km', 0)
         wandb.finish()
     
-    print(f"\nBest model at epoch {best_epoch} with concept_acc={best_val_acc:.2%}")
-    print(f"Results saved to: {output_dir}")
+    # Print summary
+    print(f"\nConcept Stage Results:")
+    print(f"  Best Concept Acc: {concept_metrics.get('val/concept_acc_top1', 0):.2%}")
+    print(f"\nGeocell Stage Results:")
+    print(f"  Median Distance: {geocell_metrics.get('val/median_distance_km', 0):.1f} km")
+    print(f"  25km Accuracy: {geocell_metrics.get('val/acc_25km', 0):.2%}")
+    print(f"  200km Accuracy: {geocell_metrics.get('val/acc_200km', 0):.2%}")
+    
+    print(f"\nModel checkpoints saved to: {output_dir}")
+    print(f"  - best_concept.pt  (Stage 1)")
+    print(f"  - best_geocell.pt  (Stage 2)")
+    print(f"  - final_model.pt   (Complete model)")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train ConceptGeo model")
+    parser = argparse.ArgumentParser(
+        description="Train ConceptGeo model with two-stage curriculum training",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python training/train_concept_geo.py
+  python training/train_concept_geo.py --concept-epochs 30 --geocell-epochs 50
+  python training/train_concept_geo.py --country-filter Japan --backbone streetclip
+        """
+    )
     
     # Data arguments
     parser.add_argument("--data-root", type=str, default="data",
                         help="Root directory for data")
     parser.add_argument("--geoguessr-id", type=str, default="6906237dc7731161a37282b2",
                         help="GeoGuessr map ID")
+    parser.add_argument("--country-filter", type=str, default=None,
+                        help="Filter dataset to specific country (e.g., 'Japan', 'France')")
     parser.add_argument("--stratified-split", action="store_true",
                         help="Use stratified split to ensure all concepts in train")
     
@@ -713,9 +925,11 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.1,
                         help="Dropout probability")
     
-    # Training arguments
-    parser.add_argument("--epochs", type=int, default=50,
-                        help="Number of training epochs")
+    # Training arguments (separate epochs for each stage)
+    parser.add_argument("--concept-epochs", type=int, default=30,
+                        help="Number of epochs for concept stage")
+    parser.add_argument("--geocell-epochs", type=int, default=50,
+                        help="Number of epochs for geocell stage")
     parser.add_argument("--batch-size", type=int, default=32,
                         help="Batch size")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
@@ -726,24 +940,30 @@ if __name__ == "__main__":
                         help="Number of data loader workers")
     
     # Loss weights
-    parser.add_argument("--lambda-concept", type=float, default=0.5,
-                        help="Weight for concept loss")
-    parser.add_argument("--lambda-geocell", type=float, default=1.0,
-                        help="Weight for geocell loss")
     parser.add_argument("--lambda-contrastive", type=float, default=0.3,
-                        help="Weight for contrastive loss")
+                        help="Weight for image-note contrastive loss (concept stage)")
+    
+    # Class imbalance handling
+    parser.add_argument("--use-focal-loss", action="store_true", default=True,
+                        help="Use focal loss for concept classification (default: True)")
+    parser.add_argument("--no-focal-loss", dest="use_focal_loss", action="store_false",
+                        help="Disable focal loss, use standard cross-entropy")
+    parser.add_argument("--focal-gamma", type=float, default=2.0,
+                        help="Gamma for focal loss (higher = more focus on hard examples)")
+    parser.add_argument("--class-weight-strategy", type=str, default="inverse_sqrt",
+                        choices=["inverse_freq", "inverse_sqrt", "effective_num"],
+                        help="Strategy for computing class weights: "
+                             "inverse_freq (1/freq), "
+                             "inverse_sqrt (1/sqrt(freq), less aggressive), "
+                             "effective_num (from Class-Balanced Loss paper)")
     
     # Output arguments
     parser.add_argument("--output-dir", type=str, default="runs",
                         help="Output directory for checkpoints")
-    parser.add_argument("--save-every", type=int, default=10,
-                        help="Save checkpoint every N epochs")
     
     # WandB arguments
-    parser.add_argument("--wandb-project", type=str, default="conceptgeo",
+    parser.add_argument("--wandb-project", type=str, default="pigeon-cbm",
                         help="WandB project name")
-    parser.add_argument("--wandb-name", type=str, default=None,
-                        help="WandB run name (auto-generated if not provided)")
     parser.add_argument("--no-wandb", action="store_true",
                         help="Disable WandB logging")
     
